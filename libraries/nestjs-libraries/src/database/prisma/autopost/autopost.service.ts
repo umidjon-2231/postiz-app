@@ -49,6 +49,10 @@ const dallePrompt = z.object({
     .describe('Generated prompt from description to be sent to DallE'),
 });
 
+// Type definitions for structured outputs
+type GenerateContentOutput = z.infer<typeof generateContent>;
+type DallePromptOutput = z.infer<typeof dallePrompt>;
+
 @Injectable()
 export class AutopostService {
   private model: any;
@@ -234,9 +238,11 @@ export class AutopostService {
         content: description,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
       ...state,
-      description: (result as any).socialMediaPostContent,
+      description: (result as GenerateContentOutput).socialMediaPostContent,
     };
   }
 
@@ -255,7 +261,9 @@ export class AutopostService {
           content: state.load.description || state.description,
         });
 
-    const image = await this.dalle.invoke((result as any).generatedTextToBeSentToDallE);
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
+    const image = await this.dalle.invoke((result as DallePromptOutput).generatedTextToBeSentToDallE);
 
     return { ...state, image };
   }

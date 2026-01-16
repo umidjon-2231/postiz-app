@@ -60,6 +60,11 @@ const hook = z.object({
     ),
 });
 
+// Type definitions for structured outputs
+type CategoryOutput = z.infer<typeof category>;
+type TopicOutput = z.infer<typeof topic>;
+type HookOutput = z.infer<typeof hook>;
+
 const contentZod = (
   isPicture: boolean,
   format: 'one_short' | 'one_long' | 'thread_short' | 'thread_long'
@@ -169,8 +174,10 @@ export class AgentGraphService {
         text: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      category: (result as any).category,
+      category: (result as CategoryOutput).category,
     };
   }
 
@@ -196,8 +203,10 @@ export class AgentGraphService {
         text: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      topic: (result as any).topic,
+      topic: (result as TopicOutput).topic,
     };
   }
 
@@ -246,15 +255,18 @@ export class AgentGraphService {
         text: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      hook: (result as any).hook,
+      hook: (result as HookOutput).hook,
     };
   }
 
   async generateContent(state: WorkflowChannelsState) {
-    const structuredOutput = this.model.withStructuredOutput(
-      contentZod(!!state.isPicture, state.format)
-    );
+    const contentSchema = contentZod(!!state.isPicture, state.format);
+    type ContentOutput = z.infer<typeof contentSchema>;
+    
+    const structuredOutput = this.model.withStructuredOutput(contentSchema);
     const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets existing hook of a social media, content and generate only the content.
@@ -297,8 +309,10 @@ export class AgentGraphService {
         information: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      content: (result as any).content,
+      content: (result as ContentOutput).content,
     };
   }
 
