@@ -215,7 +215,7 @@ export class AutopostService {
     }
 
     const structuredOutput = this.model.withStructuredOutput(generateContent);
-    const { socialMediaPostContent } = await ChatPromptTemplate.fromTemplate(
+    const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets raw 'description' of a content and generate a social media post content.
         Rules:
@@ -236,14 +236,13 @@ export class AutopostService {
 
     return {
       ...state,
-      description: socialMediaPostContent,
+      description: (result as any).socialMediaPostContent,
     };
   }
 
   async generatePicture(state: WorkflowChannelsState) {
     const structuredOutput = this.model.withStructuredOutput(dallePrompt);
-    const { generatedTextToBeSentToDallE } =
-      await ChatPromptTemplate.fromTemplate(
+    const result = await ChatPromptTemplate.fromTemplate(
         `
         You are an assistant that gets description and generate a prompt that will be sent to DallE to generate pictures.
         
@@ -256,7 +255,7 @@ export class AutopostService {
           content: state.load.description || state.description,
         });
 
-    const image = await this.dalle.invoke(generatedTextToBeSentToDallE);
+    const image = await this.dalle.invoke((result as any).generatedTextToBeSentToDallE);
 
     return { ...state, image };
   }

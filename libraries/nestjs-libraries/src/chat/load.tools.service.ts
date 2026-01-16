@@ -48,57 +48,56 @@ export class LoadToolsService {
     const tools = await this.loadTools();
     const aiConfig = this._aiConfigService.getConfig();
     
+    // Set environment variables for AI SDK to use
+    if (aiConfig.apiKey) {
+      process.env.OPENAI_API_KEY = aiConfig.apiKey;
+    }
+    if (aiConfig.baseUrl) {
+      process.env.OPENAI_BASE_URL = aiConfig.baseUrl;
+    }
+    
     // Get the appropriate AI SDK model based on provider
     let model;
     const provider = aiConfig.provider.toLowerCase();
     
     if (provider === 'openai') {
-      model = openai(aiConfig.chatModel, {
-        apiKey: aiConfig.apiKey,
-        ...(aiConfig.baseUrl ? { baseURL: aiConfig.baseUrl } : {}),
-      });
+      model = openai(aiConfig.chatModel);
     } else if (provider === 'anthropic') {
       try {
         const { anthropic } = require('@ai-sdk/anthropic');
-        model = anthropic(aiConfig.chatModel, {
-          apiKey: aiConfig.apiKey,
-          ...(aiConfig.baseUrl ? { baseURL: aiConfig.baseUrl } : {}),
-        });
+        if (aiConfig.apiKey) {
+          process.env.ANTHROPIC_API_KEY = aiConfig.apiKey;
+        }
+        model = anthropic(aiConfig.chatModel);
       } catch (error) {
         console.warn('Anthropic SDK not available, falling back to OpenAI');
-        model = openai(aiConfig.chatModel, {
-          apiKey: aiConfig.apiKey || process.env.OPENAI_API_KEY,
-        });
+        model = openai(aiConfig.chatModel);
       }
     } else if (provider === 'google') {
       try {
         const { google } = require('@ai-sdk/google');
-        model = google(aiConfig.chatModel, {
-          apiKey: aiConfig.apiKey,
-        });
+        if (aiConfig.apiKey) {
+          process.env.GOOGLE_GENERATIVE_AI_API_KEY = aiConfig.apiKey;
+        }
+        model = google(aiConfig.chatModel);
       } catch (error) {
         console.warn('Google SDK not available, falling back to OpenAI');
-        model = openai(aiConfig.chatModel, {
-          apiKey: aiConfig.apiKey || process.env.OPENAI_API_KEY,
-        });
+        model = openai(aiConfig.chatModel);
       }
     } else if (provider === 'mistral') {
       try {
         const { mistral } = require('@ai-sdk/mistral');
-        model = mistral(aiConfig.chatModel, {
-          apiKey: aiConfig.apiKey,
-        });
+        if (aiConfig.apiKey) {
+          process.env.MISTRAL_API_KEY = aiConfig.apiKey;
+        }
+        model = mistral(aiConfig.chatModel);
       } catch (error) {
         console.warn('Mistral SDK not available, falling back to OpenAI');
-        model = openai(aiConfig.chatModel, {
-          apiKey: aiConfig.apiKey || process.env.OPENAI_API_KEY,
-        });
+        model = openai(aiConfig.chatModel);
       }
     } else {
       console.warn(`Unknown AI provider: ${provider}. Using OpenAI as fallback.`);
-      model = openai(aiConfig.chatModel, {
-        apiKey: aiConfig.apiKey || process.env.OPENAI_API_KEY,
-      });
+      model = openai(aiConfig.chatModel);
     }
     
     return new Agent({
