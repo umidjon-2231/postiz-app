@@ -5,7 +5,7 @@ import {
   ToolMessage,
 } from '@langchain/core/messages';
 import { END, START, StateGraph } from '@langchain/langgraph';
-import { ChatOpenAI, DallEAPIWrapper } from '@langchain/openai';
+import { DallEAPIWrapper } from '@langchain/openai';
 import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
@@ -15,22 +15,13 @@ import { z } from 'zod';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { GeneratorDto } from '@gitroom/nestjs-libraries/dtos/generator/generator.dto';
+import { AiModelFactory } from '@gitroom/nestjs-libraries/ai/ai-model.factory';
+import { AiImageModelFactory } from '@gitroom/nestjs-libraries/ai/ai-image-model.factory';
 
 const tools = !process.env.TAVILY_API_KEY
   ? []
   : [new TavilySearchResults({ maxResults: 3 })];
 const toolNode = new ToolNode(tools);
-
-const model = new ChatOpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
-  temperature: 0.7,
-});
-
-const dalle = new DallEAPIWrapper({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'dall-e-3',
-});
 
 interface WorkflowChannelsState {
   messages: BaseMessage[];
@@ -69,6 +60,11 @@ const hook = z.object({
     ),
 });
 
+// Type definitions for structured outputs
+type CategoryOutput = z.infer<typeof category>;
+type TopicOutput = z.infer<typeof topic>;
+type HookOutput = z.infer<typeof hook>;
+
 const contentZod = (
   isPicture: boolean,
   format: 'one_short' | 'one_long' | 'thread_short' | 'thread_long'
@@ -104,10 +100,18 @@ const contentZod = (
 @Injectable()
 export class AgentGraphService {
   private storage = UploadFactory.createStorage();
+  private model: any;
+  private dalle: DallEAPIWrapper;
+
   constructor(
     private _postsService: PostsService,
-    private _mediaService: MediaService
-  ) {}
+    private _mediaService: MediaService,
+    private _aiModelFactory: AiModelFactory,
+    private _aiImageModelFactory: AiImageModelFactory
+  ) {
+    this.model = this._aiModelFactory.createChatModel({ temperature: 0.7 });
+    this.dalle = this._aiImageModelFactory.createImageModel();
+  }
   static state = () =>
     new StateGraph<WorkflowChannelsState>({
       channels: {
@@ -132,7 +136,7 @@ export class AgentGraphService {
     });
 
   async startCall(state: WorkflowChannelsState) {
-    const runTools = model.bindTools(tools);
+    const runTools = this.model.bindTools(tools);
     const response = await ChatPromptTemplate.fromTemplate(
       `
     Today is ${dayjs().format()}, You are an assistant that gets a social media post or requests for a social media post.
@@ -156,8 +160,8 @@ export class AgentGraphService {
 
   async findCategories(state: WorkflowChannelsState) {
     const allCategories = await this._postsService.findAllExistingCategories();
-    const structuredOutput = model.withStructuredOutput(category);
-    const { category: outputCategory } = await ChatPromptTemplate.fromTemplate(
+    const structuredOutput = this.model.withStructuredOutput(category);
+    const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets a text that will be later summarized into a social media post
         and classify it to one of the following categories: {categories}
@@ -170,8 +174,10 @@ export class AgentGraphService {
         text: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      category: outputCategory,
+      category: (result as CategoryOutput).category,
     };
   }
 
@@ -183,8 +189,8 @@ export class AgentGraphService {
       return { topic: null };
     }
 
-    const structuredOutput = model.withStructuredOutput(topic);
-    const { topic: outputTopic } = await ChatPromptTemplate.fromTemplate(
+    const structuredOutput = this.model.withStructuredOutput(topic);
+    const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets a text that will be later summarized into a social media post
         and classify it to one of the following topics: {topics}
@@ -197,8 +203,10 @@ export class AgentGraphService {
         text: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      topic: outputTopic,
+      topic: (result as TopicOutput).topic,
     };
   }
 
@@ -211,8 +219,8 @@ export class AgentGraphService {
   }
 
   async generateHook(state: WorkflowChannelsState) {
-    const structuredOutput = model.withStructuredOutput(hook);
-    const { hook: outputHook } = await ChatPromptTemplate.fromTemplate(
+    const structuredOutput = this.model.withStructuredOutput(hook);
+    const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets content for a social media post, and generate only the hook.
         The hook is the 1-2 sentences of the post that will be used to grab the attention of the reader.
@@ -247,16 +255,19 @@ export class AgentGraphService {
         text: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      hook: outputHook,
+      hook: (result as HookOutput).hook,
     };
   }
 
   async generateContent(state: WorkflowChannelsState) {
-    const structuredOutput = model.withStructuredOutput(
-      contentZod(!!state.isPicture, state.format)
-    );
-    const { content: outputContent } = await ChatPromptTemplate.fromTemplate(
+    const contentSchema = contentZod(!!state.isPicture, state.format);
+    type ContentOutput = z.infer<typeof contentSchema>;
+    
+    const structuredOutput = this.model.withStructuredOutput(contentSchema);
+    const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets existing hook of a social media, content and generate only the content.
         - Don't add any hashtags
@@ -298,8 +309,10 @@ export class AgentGraphService {
         information: state.fresearch,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
-      content: outputContent,
+      content: (result as ContentOutput).content,
     };
   }
 
@@ -320,7 +333,7 @@ export class AgentGraphService {
 
     const newContent = await Promise.all(
       (state.content || []).map(async (p) => {
-        const image = await dalle.invoke(p.prompt!);
+        const image = await this.dalle.invoke(p.prompt!);
         return {
           ...p,
           image,

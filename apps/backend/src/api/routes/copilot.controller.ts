@@ -23,6 +23,7 @@ import { Request, Response } from 'express';
 import { RuntimeContext } from '@mastra/core/di';
 import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permissions.ability';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
+import { AiConfigService } from '@gitroom/nestjs-libraries/ai/ai-config.service';
 
 export type ChannelsContext = {
   integrations: string;
@@ -34,15 +35,15 @@ export type ChannelsContext = {
 export class CopilotController {
   constructor(
     private _subscriptionService: SubscriptionService,
-    private _mastraService: MastraService
+    private _mastraService: MastraService,
+    private _aiConfigService: AiConfigService
   ) {}
   @Post('/chat')
   chatAgent(@Req() req: Request, @Res() res: Response) {
-    if (
-      process.env.OPENAI_API_KEY === undefined ||
-      process.env.OPENAI_API_KEY === ''
-    ) {
-      Logger.warn('OpenAI API key not set, chat functionality will not work');
+    const aiConfig = this._aiConfigService.getConfig();
+    
+    if (!aiConfig.apiKey) {
+      Logger.warn('AI API key not set, chat functionality will not work');
       return;
     }
 
@@ -50,7 +51,8 @@ export class CopilotController {
       endpoint: '/copilot/chat',
       runtime: new CopilotRuntime(),
       serviceAdapter: new OpenAIAdapter({
-        model: 'gpt-4.1',
+        model: aiConfig.chatModel,
+        ...(aiConfig.baseUrl ? { baseURL: aiConfig.baseUrl } : {}),
       }),
     });
 
@@ -64,13 +66,13 @@ export class CopilotController {
     @Res() res: Response,
     @GetOrgFromRequest() organization: Organization
   ) {
-    if (
-      process.env.OPENAI_API_KEY === undefined ||
-      process.env.OPENAI_API_KEY === ''
-    ) {
-      Logger.warn('OpenAI API key not set, chat functionality will not work');
+    const aiConfig = this._aiConfigService.getConfig();
+    
+    if (!aiConfig.apiKey) {
+      Logger.warn('AI API key not set, chat functionality will not work');
       return;
     }
+    
     const mastra = await this._mastraService.mastra();
     const runtimeContext = new RuntimeContext<ChannelsContext>();
     runtimeContext.set(
@@ -97,7 +99,8 @@ export class CopilotController {
       runtime,
       // properties: req.body.variables.properties,
       serviceAdapter: new OpenAIAdapter({
-        model: 'gpt-4.1',
+        model: aiConfig.chatModel,
+        ...(aiConfig.baseUrl ? { baseURL: aiConfig.baseUrl } : {}),
       }),
     });
 

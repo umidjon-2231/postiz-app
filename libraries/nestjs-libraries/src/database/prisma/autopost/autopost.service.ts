@@ -6,7 +6,7 @@ import { END, START, StateGraph } from '@langchain/langgraph';
 import { AutoPost, Integration } from '@prisma/client';
 import { BaseMessage } from '@langchain/core/messages';
 import striptags from 'striptags';
-import { ChatOpenAI, DallEAPIWrapper } from '@langchain/openai';
+import { DallEAPIWrapper } from '@langchain/openai';
 import { JSDOM } from 'jsdom';
 import { z } from 'zod';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
@@ -19,6 +19,8 @@ import { TypedSearchAttributes } from '@temporalio/common';
 import {
   organizationId,
 } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
+import { AiModelFactory } from '@gitroom/nestjs-libraries/ai/ai-model.factory';
+import { AiImageModelFactory } from '@gitroom/nestjs-libraries/ai/ai-image-model.factory';
 const parser = new Parser();
 
 interface WorkflowChannelsState {
@@ -35,17 +37,6 @@ interface WorkflowChannelsState {
   };
 }
 
-const model = new ChatOpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
-  temperature: 0.7,
-});
-
-const dalle = new DallEAPIWrapper({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-image-1',
-});
-
 const generateContent = z.object({
   socialMediaPostContent: z
     .string()
@@ -58,14 +49,26 @@ const dallePrompt = z.object({
     .describe('Generated prompt from description to be sent to DallE'),
 });
 
+// Type definitions for structured outputs
+type GenerateContentOutput = z.infer<typeof generateContent>;
+type DallePromptOutput = z.infer<typeof dallePrompt>;
+
 @Injectable()
 export class AutopostService {
+  private model: any;
+  private dalle: DallEAPIWrapper;
+
   constructor(
     private _autopostsRepository: AutopostRepository,
     private _temporalService: TemporalService,
     private _integrationService: IntegrationService,
-    private _postsService: PostsService
-  ) {}
+    private _postsService: PostsService,
+    private _aiModelFactory: AiModelFactory,
+    private _aiImageModelFactory: AiImageModelFactory
+  ) {
+    this.model = this._aiModelFactory.createChatModel({ temperature: 0.7 });
+    this.dalle = this._aiImageModelFactory.createImageModel();
+  }
 
   async stopAll(org: string) {
     const getAll = (await this.getAutoposts(org)).filter((f) => f.active);
@@ -215,8 +218,8 @@ export class AutopostService {
       };
     }
 
-    const structuredOutput = model.withStructuredOutput(generateContent);
-    const { socialMediaPostContent } = await ChatPromptTemplate.fromTemplate(
+    const structuredOutput = this.model.withStructuredOutput(generateContent);
+    const result = await ChatPromptTemplate.fromTemplate(
       `
         You are an assistant that gets raw 'description' of a content and generate a social media post content.
         Rules:
@@ -235,16 +238,17 @@ export class AutopostService {
         content: description,
       });
 
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
     return {
       ...state,
-      description: socialMediaPostContent,
+      description: (result as GenerateContentOutput).socialMediaPostContent,
     };
   }
 
   async generatePicture(state: WorkflowChannelsState) {
-    const structuredOutput = model.withStructuredOutput(dallePrompt);
-    const { generatedTextToBeSentToDallE } =
-      await ChatPromptTemplate.fromTemplate(
+    const structuredOutput = this.model.withStructuredOutput(dallePrompt);
+    const result = await ChatPromptTemplate.fromTemplate(
         `
         You are an assistant that gets description and generate a prompt that will be sent to DallE to generate pictures.
         
@@ -257,7 +261,9 @@ export class AutopostService {
           content: state.load.description || state.description,
         });
 
-    const image = await dalle.invoke(generatedTextToBeSentToDallE);
+    // Type assertion needed because LangChain's withStructuredOutput returns unknown
+    // Runtime type safety is enforced by the Zod schema
+    const image = await this.dalle.invoke((result as DallePromptOutput).generatedTextToBeSentToDallE);
 
     return { ...state, image };
   }
